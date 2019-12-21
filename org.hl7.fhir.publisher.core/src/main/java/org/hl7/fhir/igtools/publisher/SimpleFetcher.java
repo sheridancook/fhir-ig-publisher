@@ -260,7 +260,9 @@ public class SimpleFetcher implements IFetchFile {
                   count++;
                   ok = true;
                 } catch (Exception e) {
-                  log.logMessage(e.getMessage() +" loading "+f);
+                  // Don't complain about spreadsheet XML files sitting in resource directories - we still expect those
+                  if (!e.getMessage().contains("unknown namespace/name 'urn:schemas-microsoft-com:office:spreadsheet::Workbook'"))
+                    log.logMessage(e.getMessage() +" loading "+f);
                 }
               if (!ok && !Utilities.existsInList(ext, "xml", "ttl", "html", "txt")) {
                 try {
