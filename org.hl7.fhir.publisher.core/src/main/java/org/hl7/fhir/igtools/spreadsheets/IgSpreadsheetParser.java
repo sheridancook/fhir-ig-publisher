@@ -267,6 +267,8 @@ public class IgSpreadsheetParser {
     bundle.addEntry().setResource(sd).setFullUrl(sd.getUrl());
 
     // Changed the default from metadata to Short because the former caused problems when there are multiple sheets in a workbook
+    if (sheet.hasColumn(0, "Definition"))
+      sd.setDescription(sheet.getColumn(0, "Definition"));
     if (sheet.hasColumn(0, "Profile.title"))
       sd.setTitle(sheet.getColumn(0, "Profile.title"));
     else if (sd.getDifferential().getElementFirstRep().hasShort())
@@ -1171,7 +1173,7 @@ public class IgSpreadsheetParser {
     StructureDefinition base = this.context.fetchResource(StructureDefinition.class, "http://hl7.org/fhir/StructureDefinition/Extension");
     List<String> errors = new ArrayList<String>();
     ProfileUtilities utils = new ProfileUtilities(this.context, issues, null);
-    utils.sortDifferential(base, ex, "extension "+ex.getUrl(), errors);
+    utils.sortDifferential(base, ex, "extension "+ex.getUrl(), errors, false);
     assert(errors.size() == 0);
     utils.setIds(ex, false);
     return row;
