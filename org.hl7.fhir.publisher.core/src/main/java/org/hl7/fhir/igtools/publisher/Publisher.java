@@ -364,7 +364,7 @@ public class Publisher implements IWorkerContext.ILoggingService, IReferenceReso
     }
 
     @Override
-    public Base resolveReference(Object appContext, String url) {
+    public Base resolveReference(Object appContext, String url, Base refContext) {
       if (Utilities.isAbsoluteUrl(url)) {
         if (url.startsWith(igpkp.getCanonical())) {
           url = url.substring(igpkp.getCanonical().length());
@@ -503,7 +503,7 @@ public class Publisher implements IWorkerContext.ILoggingService, IReferenceReso
   private CodeSystemValidator csvalidator;
   private IGKnowledgeProvider igpkp;
   private List<SpecMapManager> specMaps = new ArrayList<SpecMapManager>();
-  private boolean first;
+  private boolean firstExecution;
 
   private Map<String, SpecificationPackage> specifications;
   private Map<String, MappingSpace> mappingSpaces = new HashMap<String, MappingSpace>();
@@ -667,7 +667,7 @@ public class Publisher implements IWorkerContext.ILoggingService, IReferenceReso
       }
 
       if (watch) {
-        first = false;
+        firstExecution = false;
         log("Watching for changes on a 5sec cycle");
         while (watch) { // terminated externally
           Thread.sleep(5000);
@@ -1156,7 +1156,7 @@ public class Publisher implements IWorkerContext.ILoggingService, IReferenceReso
   }
 
   public void initialize() throws Exception {
-    first = true;
+    firstExecution = true;
     pcm = new PackageCacheManager(mode == null || mode == IGBuildMode.MANUAL || mode == IGBuildMode.PUBLICATION, ToolsVersion.TOOLS_VERSION);
     if (mode == IGBuildMode.PUBLICATION)
       log("Build Formal Publication package, intended for "+getTargetOutput());
@@ -2541,7 +2541,7 @@ public class Publisher implements IWorkerContext.ILoggingService, IReferenceReso
 
   private boolean checkMakeFile(byte[] bs, String path, Set<String> outputTracker) throws IOException {
     logDebugMessage(LogCategory.GENERATE, "Check Generate "+path);
-    if (first) {
+    if (firstExecution) {
       String s = path.toLowerCase();
       if (allOutputs.contains(s))
         throw new Error("Error generating build: the file "+path+" is being generated more than once (may differ by case)");
@@ -2666,7 +2666,7 @@ public class Publisher implements IWorkerContext.ILoggingService, IReferenceReso
       if (res.hasExampleCanonicalType()) {
         if (f != null && f.getResources().size()!=1)
           throw new Exception("Can't have an exampleFor unless the file has exactly one resource");
-        FetchedResource r = f.getResources().get(0);
+        FetchedResource r = res.hasUserData("loaded.resource") ? (FetchedResource) res.getUserData("loaded.resource") : f.getResources().get(0);
         if (r == null)
             throw new Exception("Unable to resolve example canonical " + res.getExampleCanonicalType().asStringValue());
         examples.add(r);
@@ -3122,7 +3122,7 @@ public class Publisher implements IWorkerContext.ILoggingService, IReferenceReso
           res.setDescription(((CanonicalResource)r.getResource()).getDescription());
         res.setReference(new Reference().setReference(r.getElement().fhirType()+"/"+r.getId()));
       }
-      res.setUserData("loaded.resource", f);
+      res.setUserData("loaded.resource", r);
       r.setResEntry(res);
     }
     return changed || needToBuild;
@@ -3175,7 +3175,7 @@ public class Publisher implements IWorkerContext.ILoggingService, IReferenceReso
     if (changed) {
       f.getValuesetsToLoad().clear();
       logDebugMessage(LogCategory.INIT, "load "+f.getPath());
-      Bundle bnd = new IgSpreadsheetParser(context, execTime, igpkp.getCanonical(), f.getValuesetsToLoad(), first, mappingSpaces, knownValueSetIds).parse(f);
+      Bundle bnd = new IgSpreadsheetParser(context, execTime, igpkp.getCanonical(), f.getValuesetsToLoad(), firstExecution, mappingSpaces, knownValueSetIds).parse(f);
       f.setBundle(new FetchedResource());
       f.setBundleType(FetchedBundleType.SPREADSHEET);
       f.getBundle().setResource(bnd);
@@ -4092,7 +4092,7 @@ public class Publisher implements IWorkerContext.ILoggingService, IReferenceReso
   private void validate() throws Exception {
     for (FetchedFile f : fileList) {
       logDebugMessage(LogCategory.PROGRESS, " .. validate "+f.getName());
-      if (first)
+      if (firstExecution)
         logDebugMessage(LogCategory.PROGRESS, " .. "+f.getName());
       for (FetchedResource r : f.getResources()) {
         if (!r.isValidated()) {
@@ -4107,24 +4107,26 @@ public class Publisher implements IWorkerContext.ILoggingService, IReferenceReso
       for (FetchedResource r : f.getResources()) {
         if (r.fhirType().equals("StructureDefinition")) {
           StructureDefinition sd = (StructureDefinition) r.getResource();
-          if (sd.getKind() == StructureDefinitionKind.RESOURCE) {
-            int cE = countStatedExamples(sd.getUrl());
-            int cI = countFoundExamples(sd.getUrl());
-            if (cE + cI == 0) {
-              f.getErrors().add(new ValidationMessage(Source.Publisher, IssueType.BUSINESSRULE, sd.getUrl(), "The Implementation Guide contains no examples for this profile", IssueSeverity.WARNING));
-            } else if (cE == 0) {
-              f.getErrors().add(new ValidationMessage(Source.Publisher, IssueType.BUSINESSRULE, sd.getUrl(), "The Implementation Guide contains no explicitly linked examples for this profile", IssueSeverity.INFORMATION));
-            }
-          } else if (sd.getKind() == StructureDefinitionKind.COMPLEXTYPE) {
-            if (sd.getType().equals("Extension")) {
-              int c = countUsages(getFixedUrl(sd));
-              if (c == 0) {
-                f.getErrors().add(new ValidationMessage(Source.Publisher, IssueType.BUSINESSRULE, sd.getUrl(), "The Implementation Guide contains no examples for this extension", IssueSeverity.WARNING));
-              }
-            } else {
+          if (!sd.getAbstract()) {
+            if (sd.getKind() == StructureDefinitionKind.RESOURCE) {
+              int cE = countStatedExamples(sd.getUrl());
               int cI = countFoundExamples(sd.getUrl());
-              if (cI == 0) {
-                f.getErrors().add(new ValidationMessage(Source.Publisher, IssueType.BUSINESSRULE, sd.getUrl(), "The Implementation Guide contains no examples for this data type profile", IssueSeverity.WARNING));
+              if (cE + cI == 0) {
+                f.getErrors().add(new ValidationMessage(Source.Publisher, IssueType.BUSINESSRULE, sd.getUrl(), "The Implementation Guide contains no examples for this profile", IssueSeverity.WARNING));
+              } else if (cE == 0) {
+                f.getErrors().add(new ValidationMessage(Source.Publisher, IssueType.BUSINESSRULE, sd.getUrl(), "The Implementation Guide contains no explicitly linked examples for this profile", IssueSeverity.INFORMATION));
+              }
+            } else if (sd.getKind() == StructureDefinitionKind.COMPLEXTYPE) {
+              if (sd.getType().equals("Extension")) {
+                int c = countUsages(getFixedUrl(sd));
+                if (c == 0) {
+                  f.getErrors().add(new ValidationMessage(Source.Publisher, IssueType.BUSINESSRULE, sd.getUrl(), "The Implementation Guide contains no examples for this extension", IssueSeverity.WARNING));
+                }
+              } else {
+                int cI = countFoundExamples(sd.getUrl());
+                if (cI == 0) {
+                  f.getErrors().add(new ValidationMessage(Source.Publisher, IssueType.BUSINESSRULE, sd.getUrl(), "The Implementation Guide contains no examples for this data type profile", IssueSeverity.WARNING));
+                }
               }
             }
           }
@@ -6588,7 +6590,7 @@ public class Publisher implements IWorkerContext.ILoggingService, IReferenceReso
 
   @Override
   public void logMessage(String msg) {
-    if (first)
+    if (firstExecution)
       System.out.println(Utilities.padRight(msg, ' ', 80)+" ("+presentDuration(System.nanoTime()-globalStart)+")");
     else
       System.out.println(msg);
