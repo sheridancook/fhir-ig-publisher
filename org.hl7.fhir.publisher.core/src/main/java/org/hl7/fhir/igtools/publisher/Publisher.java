@@ -4944,6 +4944,7 @@ public class Publisher implements IWorkerContext.ILoggingService, IReferenceReso
           if (base != null) {
             item.addProperty("basename", base.getName());
             item.addProperty("basepath", base.getUserString("path"));
+            item.addProperty("basetitle", base.getTitle());
           }
           item.addProperty("status", sd.getStatus().toCode());
           item.addProperty("date", sd.getDate().toString());
